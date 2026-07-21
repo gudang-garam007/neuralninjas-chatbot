@@ -2,7 +2,7 @@ import os
 import re
 from functools import lru_cache
 
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 from supabase import create_client, Client
 from groq import Groq
 
@@ -17,14 +17,15 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 
 
 @lru_cache(maxsize=1)
-def get_embedder() -> SentenceTransformer:
-    # loaded once per process, kept warm in memory
-    return SentenceTransformer(EMBEDDING_MODEL)
+def get_embedder() -> TextEmbedding:
+    # loaded once per process, kept warm in memory. fastembed uses ONNX
+    # runtime (no torch), much lighter on RAM than sentence-transformers.
+    return TextEmbedding(model_name=EMBEDDING_MODEL)
 
 
 def embed_text(text: str) -> list[float]:
     model = get_embedder()
-    vec = model.encode(text, normalize_embeddings=True)
+    vec = next(model.embed([text]))
     return vec.tolist()
 
 
