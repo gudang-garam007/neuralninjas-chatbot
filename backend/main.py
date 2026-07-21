@@ -72,8 +72,7 @@ def trigger_crawl(request: Request, secret: str):
     if not expected or secret != expected:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    import asyncio
     from crawler import crawl_site
     site_url = os.environ.get("SITE_URL", "https://neuralninjas.in")
-    asyncio.run(crawl_site(site_url))
+    crawl_site(site_url)
     return {"status": "crawl complete"}
