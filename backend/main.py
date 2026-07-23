@@ -9,7 +9,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from rag import generate_answer
+from rag import generate_answer, load_session, save_session
 
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "").split(",")
 
@@ -24,11 +24,6 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )
-
-# in-memory session store (Phase 1). Swap for Supabase nn_chat_sessions later
-# if you need memory to survive server restarts.
-SESSIONS: dict[str, list[dict]] = {}
-MAX_SESSIONS = 5000
 
 
 class ChatRequest(BaseModel):
@@ -52,14 +47,15 @@ def chat(request: Request, body: ChatRequest):
     if not body.message or not body.message.strip():
         raise HTTPException(status_code=400, detail="Empty message")
 
-    history = SESSIONS.get(body.session_id, [])
+    # session_id acts as a persistent thread_id - history is stored in
+    # Supabase (nn_chat_sessions), so it survives server restarts/sleeps
+    # and keeps working across a visitor's future sessions on this browser.
+    history = load_session(body.session_id)
     result = generate_answer(body.message, history=history)
 
     history.append({"role": "user", "content": body.message})
     history.append({"role": "assistant", "content": result["answer"]})
-    if len(SESSIONS) > MAX_SESSIONS:
-        SESSIONS.clear()  # crude cap, fine for Phase 1
-    SESSIONS[body.session_id] = history[-10:]
+    save_session(body.session_id, history[-10:])
 
     return {"answer": result["answer"], "sources": result["sources"]}
 
