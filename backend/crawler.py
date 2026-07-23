@@ -104,7 +104,7 @@ def extract_text_and_links(url: str, html: str, domain: str):
     return title, text, links
 
 
-def crawl_site(start_url: str, max_pages: int = 400):
+def crawl_site(start_url: str, max_pages: int = 400, status: dict | None = None):
     domain = urlparse(start_url).netloc
     visited = set()
 
@@ -122,11 +122,18 @@ def crawl_site(start_url: str, max_pages: int = 400):
         to_visit = [start_url]
         follow_links = True
 
+    if status is not None:
+        status["total_found"] = len(to_visit) if not follow_links else None
+
     while to_visit and len(visited) < max_pages:
         url = to_visit.pop(0)
         if url in visited:
             continue
         visited.add(url)
+
+        if status is not None:
+            status["pages_done"] = len(visited)
+            status["current_url"] = url
 
         try:
             resp = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
@@ -148,6 +155,9 @@ def crawl_site(start_url: str, max_pages: int = 400):
                     to_visit.append(link)
 
     print(f"Done. Crawled {len(visited)} pages.")
+    if status is not None:
+        status["pages_done"] = len(visited)
+        status["current_url"] = None
 
 
 def index_page(url: str, title: str, text: str):
