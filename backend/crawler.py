@@ -1,7 +1,9 @@
 """
 Crawls neuralninjas.in, chunks page content, embeds it, and upserts into
-Supabase (nn_documents). Uses plain requests + BeautifulSoup (no headless
-browser) so it fits comfortably in a 512MB free-tier RAM budget.
+Supabase (nn_documents). First tries WordPress/XML sitemaps to get a
+complete, reliable list of every post and page (this avoids missing pages
+that are only linked via JS-rendered carousels on the homepage). Falls back
+to plain link-crawling if no sitemap is found.
 
 Usage:
     python crawler.py https://neuralninjas.in
@@ -9,6 +11,7 @@ Usage:
 import re
 import sys
 from urllib.parse import urljoin, urlparse
+from xml.etree import ElementTree
 
 import requests
 from bs4 import BeautifulSoup
@@ -20,6 +23,15 @@ CHUNK_OVERLAP = 150
 REQUEST_TIMEOUT = 15
 HEADERS = {"User-Agent": "NeuralNinjasBot/1.0 (+https://neuralninjas.in)"}
 
+SITEMAP_CANDIDATES = [
+    "/sitemap_index.xml",
+    "/sitemap.xml",
+    "/wp-sitemap.xml",
+]
+
+SKIP_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".pdf",
+                    ".zip", ".css", ".js", ".xml", ".ico")
+
 
 def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
@@ -30,6 +42,46 @@ def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) 
         chunks.append(text[start:end])
         start = end - overlap
     return [c.strip() for c in chunks if len(c.strip()) > 50]
+
+
+def fetch_sitemap_urls(base_url: str) -> list[str]:
+    """Recursively resolve sitemap index files into a flat list of page URLs."""
+    urls = []
+    to_parse = []
+
+    for path in SITEMAP_CANDIDATES:
+        try:
+            resp = requests.get(urljoin(base_url, path), headers=HEADERS, timeout=REQUEST_TIMEOUT)
+            if resp.status_code == 200 and "<" in resp.text[:100]:
+                to_parse.append(resp.text)
+                break
+        except Exception:
+            continue
+
+    seen_sitemaps = set()
+    while to_parse:
+        xml_text = to_parse.pop()
+        try:
+            root = ElementTree.fromstring(xml_text)
+        except ElementTree.ParseError:
+            continue
+
+        ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+        locs = [el.text.strip() for el in root.findall(".//sm:loc", ns) if el.text]
+
+        for loc in locs:
+            if loc.endswith(".xml") and loc not in seen_sitemaps:
+                seen_sitemaps.add(loc)
+                try:
+                    r = requests.get(loc, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+                    if r.status_code == 200:
+                        to_parse.append(r.text)
+                except Exception:
+                    continue
+            elif not loc.endswith(".xml"):
+                urls.append(loc)
+
+    return urls
 
 
 def extract_text_and_links(url: str, html: str, domain: str):
@@ -52,10 +104,23 @@ def extract_text_and_links(url: str, html: str, domain: str):
     return title, text, links
 
 
-def crawl_site(start_url: str, max_pages: int = 200):
+def crawl_site(start_url: str, max_pages: int = 400):
     domain = urlparse(start_url).netloc
     visited = set()
-    to_visit = [start_url]
+
+    sitemap_urls = fetch_sitemap_urls(start_url)
+    sitemap_urls = [u for u in sitemap_urls
+                     if urlparse(u).netloc == domain
+                     and not u.lower().endswith(SKIP_EXTENSIONS)]
+
+    if sitemap_urls:
+        print(f"Found {len(sitemap_urls)} URLs via sitemap.")
+        to_visit = list(dict.fromkeys(sitemap_urls))  # dedupe, keep order
+        follow_links = False
+    else:
+        print("No sitemap found, falling back to link-crawling.")
+        to_visit = [start_url]
+        follow_links = True
 
     while to_visit and len(visited) < max_pages:
         url = to_visit.pop(0)
@@ -77,9 +142,10 @@ def crawl_site(start_url: str, max_pages: int = 200):
         title, text, links = extract_text_and_links(url, resp.text, domain)
         index_page(url, title, text)
 
-        for link in links:
-            if link not in visited and link not in to_visit:
-                to_visit.append(link)
+        if follow_links:
+            for link in links:
+                if link not in visited and link not in to_visit:
+                    to_visit.append(link)
 
     print(f"Done. Crawled {len(visited)} pages.")
 
