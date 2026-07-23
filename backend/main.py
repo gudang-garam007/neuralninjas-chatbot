@@ -64,15 +64,41 @@ def chat(request: Request, body: ChatRequest):
     return {"answer": result["answer"], "sources": result["sources"]}
 
 
+import threading
+
+crawl_status = {"state": "idle", "pages_done": 0, "total_found": None, "current_url": None}
+
+
+def _run_crawl(site_url: str):
+    from crawler import crawl_site
+    crawl_status["state"] = "running"
+    crawl_status["pages_done"] = 0
+    crawl_status["current_url"] = None
+    try:
+        crawl_site(site_url, status=crawl_status)
+        crawl_status["state"] = "done"
+    except Exception as e:
+        crawl_status["state"] = f"error: {e}"
+
+
 @app.post("/crawl")
 def trigger_crawl(request: Request, secret: str):
-    """Call this after deploying, and again whenever you publish new content.
-    Protect it with a shared secret so randoms can't trigger recrawls."""
+    """Kicks off a crawl in the background and returns immediately, so the
+    HTTP request doesn't sit open long enough to hit a gateway timeout.
+    Check progress with GET /crawl-status."""
     expected = os.environ.get("CRAWL_SECRET", "")
     if not expected or secret != expected:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    from crawler import crawl_site
+    if crawl_status["state"] == "running":
+        return {"status": "already running", "progress": crawl_status}
+
     site_url = os.environ.get("SITE_URL", "https://neuralninjas.in")
-    crawl_site(site_url)
-    return {"status": "crawl complete"}
+    thread = threading.Thread(target=_run_crawl, args=(site_url,), daemon=True)
+    thread.start()
+    return {"status": "crawl started in background", "check_progress_at": "/crawl-status"}
+
+
+@app.get("/crawl-status")
+def get_crawl_status():
+    return crawl_status
