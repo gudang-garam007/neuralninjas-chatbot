@@ -50,6 +50,56 @@ def sanitize_user_input(text: str) -> tuple[str, bool]:
     return text, suspicious
 
 
+# ---------------- Dynamic behavior: filler / abuse / code detection ----------------
+
+FILLER_RE = re.compile(
+    r"^(h+a+h*a*|l+o+l+|ok+a?y?|hm+|k|thanks?|thank\s?you|thx|cool|nice|great|👍|😂|😅|🙏)\W*$",
+    re.IGNORECASE,
+)
+
+FILLER_REPLIES = [
+    "Haha, all good! Anything else on your mind?",
+    "👍 Let me know if you want to dig into anything else.",
+    "Noted! I'm here whenever you've got a real question.",
+    "Cool cool — ask away whenever you're ready.",
+]
+
+
+def is_filler(text: str) -> bool:
+    t = text.strip()
+    if len(t) <= 2:
+        return True
+    return bool(FILLER_RE.match(t))
+
+
+ABUSE_WORDS = {
+    "fuck", "fucking", "fck", "bitch", "asshole", "bastard", "chutiya",
+    "madarchod", "behenchod", "bhosdike", "randi", "gandu", "harami",
+    "saala kutta", "kamina",
+}
+
+ABUSE_REPLIES = [
+    "Let's keep it friendly here 🙂 — happy to help once we're back to a normal conversation.",
+    "I'll pass on that one, but I'm genuinely happy to help if you've got a real question.",
+    "No worries, but let's reset the tone — what did you actually want to know?",
+]
+
+
+def is_abusive(text: str) -> bool:
+    lowered = text.lower()
+    return any(word in lowered for word in ABUSE_WORDS)
+
+
+CODE_HINT_RE = re.compile(
+    r"```|\bdef \b|\bfunction\b|\bimport \b|\bclass \b|;\s*$|\{\s*$|</?\w+>|\berror\b|\bbug\b|\btraceback\b|\bexception\b|\bsyntax\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def looks_like_code_question(text: str) -> bool:
+    return bool(CODE_HINT_RE.search(text))
+
+
 # ---------------- Hybrid retrieval (dense + keyword rerank) ----------------
 
 def _keyword_overlap(query: str, text: str) -> float:
@@ -248,6 +298,16 @@ def generate_answer(query: str, history: list[dict] | None = None) -> dict:
             "flagged": True,
         }
 
+    # Fast paths: skip the whole RAG/LLM pipeline for trivial inputs -
+    # cheaper, faster, and avoids wasting tokens on "hmm" or "haha".
+    if is_abusive(clean_query):
+        import random
+        return {"answer": random.choice(ABUSE_REPLIES), "sources": [], "flagged": True}
+
+    if is_filler(clean_query):
+        import random
+        return {"answer": random.choice(FILLER_REPLIES), "sources": [], "flagged": False}
+
     query_embedding = embed_text(clean_query)
 
     cached = check_cache(query_embedding)
@@ -272,10 +332,14 @@ def generate_answer(query: str, history: list[dict] | None = None) -> dict:
         messages.extend(history[-6:])
     messages.append({"role": "user", "content": user_content})
 
+    # Dynamic temperature: precise/low for coding & technical questions,
+    # slightly more expressive (still controlled) for everything else.
+    temperature = 0.15 if looks_like_code_question(clean_query) else 0.4
+
     completion = groq_client.chat.completions.create(
         model=GROQ_MODEL,
         messages=messages,
-        temperature=0.4,
+        temperature=temperature,
         max_tokens=700,
     )
     answer = completion.choices[0].message.content
