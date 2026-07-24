@@ -14,12 +14,18 @@
   // Ninja-star / circuit-node agent logo, reused for launcher + avatars
   const NN_LOGO_SVG = `
     <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-      <g fill="none" stroke="#00ff9c" stroke-width="1.6" stroke-linejoin="round">
-        <path d="M24 3 L28 20 L45 24 L28 28 L24 45 L20 28 L3 24 L20 20 Z" fill="rgba(0,255,156,0.08)"/>
+      <defs>
+        <linearGradient id="nnGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#22d3ee"/>
+          <stop offset="100%" stop-color="#7b2cbf"/>
+        </linearGradient>
+      </defs>
+      <g fill="none" stroke="url(#nnGrad)" stroke-width="1.6" stroke-linejoin="round">
+        <path d="M24 3 L28 20 L45 24 L28 28 L24 45 L20 28 L3 24 L20 20 Z" fill="rgba(34,211,238,0.08)"/>
       </g>
-      <circle cx="24" cy="24" r="5" fill="#05070a" stroke="#00ff9c" stroke-width="1.6"/>
-      <circle cx="24" cy="24" r="2" fill="#00ff9c"/>
-      <g stroke="#00ff9c" stroke-width="1" opacity="0.7">
+      <circle cx="24" cy="24" r="5" fill="#0c0c12" stroke="url(#nnGrad)" stroke-width="1.6"/>
+      <circle cx="24" cy="24" r="2" fill="#22d3ee"/>
+      <g stroke="url(#nnGrad)" stroke-width="1" opacity="0.8">
         <line x1="24" y1="14" x2="24" y2="19"/>
         <line x1="24" y1="29" x2="24" y2="34"/>
         <line x1="14" y1="24" x2="19" y2="24"/>
@@ -34,7 +40,7 @@
 
   const SEND_SVG = `
     <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M3 11L21 3L13 21L11 13L3 11Z" fill="#05070a"/>
+      <path d="M3 11L21 3L13 21L11 13L3 11Z" fill="#04070d"/>
     </svg>`;
 
   const root = document.createElement("div");
@@ -53,8 +59,8 @@
     <div id="nn-chat-header">
       <div class="nn-avatar">${NN_LOGO_SVG}</div>
       <div id="nn-chat-header-text">
-        <div id="nn-chat-header-title">NEURAL NINJA AI</div>
-        <div id="nn-chat-header-status"><span class="nn-dot"></span>Online</div>
+        <div id="nn-chat-header-eyebrow" class="nn-mono">// AI ASSISTANT</div>
+        <div id="nn-chat-header-title" class="nn-display">Neural Ninja AI</div>
       </div>
       <button id="nn-chat-close" aria-label="Close chat">${CLOSE_SVG}</button>
     </div>
